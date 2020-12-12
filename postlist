@@ -1,4 +1,8 @@
 #!/bin/bash
+
+# TODO: Run with suid and have a list user.
+# Examine how mailman3 filtering happend - we are also a filter
+
 set -e
 export PATH=${PATH}:/usr/bin:/usr/sbin
 
@@ -39,54 +43,65 @@ fi
 echo Parse ${CONFIG_FILE}
 parseIniFile ${CONFIG_FILE}
 
-BOUNCE="${CONFIG[general.bounce]}"
 ADMIN="${CONFIG[general.owner]}"
 LIB_DIR="${CONFIG[general.archive_dir]}"
 ALIAS_FILE="${CONFIG[general.alias_file]}"
+DOMAIN="${CONFIG[general.domain]}"
 
 SENDMAIL="/usr/sbin/sendmail -G -i" # NEVER NEVER NEVER use "-t" here.
 # Exit codes from <sysexits.h>
 EX_TEMPFAIL=75
 EX_UNAVAILABLE=69
 
+# Need to handle CC.
 function handle_mail () {
     LIST=$1
-    ADDRESS="${CONFIG[${LIST}.address]}"
+    ADDRESS=${LIST}@${DOMAIN}
+    if [ -z "${ADDRESS}" ]; then
+	echo "List does not exist: $LIST"
+	exit ${EX_UNAVAILABLE}
+    fi
     SUBSCRIBERS="${CONFIG[${LIST}.subscribers]}"
     DESCRIPTION="${CONFIG[${LIST}.description]}"
+    BOUNCE=${LIST}-bounce@${DOMAIN}
 
+    # Figure out if we are CC'ed or Addressed directly
+    # Its a bit hard, as we might have multiple TO adresses and multiple CC addresses
+    
     MAIL=${LIB_DIR}/$LIST/new/$(date -Ins)
     cat >${MAIL} || (echo Cannot save mail to file; exit $EX_TEMPFAIL)
 
-    if formail -z -x 'X-Loop:' | grep -q ${ID}; then
+    if formail -z -x 'X-Loop:' | grep -q ${LIST}; then
         SUBJECT=$(formail -x Subject: < ${MAIL})
         cat ${MAIL} \
             | formail -t -f \
 	              -I "List-Id: ${DESCRIPTION} <$ADDRESS>" \
-	              -I "To:${ID} <${ADMIN}>" \
 	              -I "DKIM-Signature:" \
-	              -i "Subject:[$ID Bounce] ${SUBJECT}" \
+	              -i "Subject:[$LIST Bounce] ${SUBJECT}" \
             | ${SENDMAIL} ${ADMIN}
+	mv $MAIL $(dirname ${MAIL})/../bounce
+
     else
         SENDER=$(formail -z -x 'From:' < ${MAIL} | sed 's/</(/g' | sed 's/>/)/g')
+	#-I "To:${LIST} <${ADDRESS}>" \
+
         cat ${MAIL} \
             | formail -t -f \
 	              -I "Return-Path:" \
-	              -i "From: [${ID}] ${SENDER} <${ADDRESS}>" \
-      	              -I "To:${ID} <${ADDRESS}>" \
-	              -I "X-Loop: ${ID}" \
+	              -i "From: [${LIST}] ${SENDER} <${ADDRESS}>" \
+	              -I "X-Loop: ${LIST}" \
 	              -I "List-Id: ${DESCRIPTION} <$ADDRESS>" \
 	              -I "DKIM-Signature:" \
                       -I "Message-ID:" -a "Message-ID:" \
             | ${SENDMAIL} -f ${BOUNCE} ${SUBSCRIBERS}
+	mv $MAIL $(dirname ${MAIL})/../archive
     fi
-    mv $MAIL $(dirname ${MAIL}/../archive)
 }
 
 ## Setup all lists.
 
 function setup () {
-    echo -n "Setup lists:"
+    echo -n "Setup ${ALIAS_FILE} for lists:"
     SCRIPT=$(readlink -f $0)
     # Create all directories, and create the alias file
     LISTS="$(cat $CONFIG_FILE | grep "^\[.*\]" | sed 's/[\[\]]//g' | tr -d "[]" | grep -v 'general')"
@@ -95,19 +110,23 @@ function setup () {
 
     for LIST in ${LISTS}; do
         echo -n "$LIST "
-        ADDRESS="${CONFIG[${LIST}.address]}"
-        SUBSCRIBERS="${CONFIG[${LIST}.subscribers]}"
-        DESCRIPTION="${CONFIG[${LIST}.description]}"
+	ADDRESS=${LIST}@${DOMAIN}
+	SUBSCRIBERS="${CONFIG[${LIST}.subscribers]}"
+	DESCRIPTION="${CONFIG[${LIST}.description]}"
         echo >> ${ALIAS_FILE}
         echo "# ${LIST}: ${DESCRIPTION} <${ADDRESS}>" >> ${ALIAS_FILE}
-        echo "# ${SUBSCRIBERS}" >> ${ALIAS_FILE}
-        echo "${LIST}: |${SCRIPT} ${LIST}" >> ${ALIAS_FILE}
-        echo "${LIST}-bounce: ${BOUNCE}" >> ${ALIAS_FILE}
+        echo "${LIST}: |${SCRIPT}" >> ${ALIAS_FILE}
+        echo "${LIST}-bounce: ${ADMIN}" >> ${ALIAS_FILE}
 
-        mkdir -p ${LIB_DIR}/${LIST}/new
-        mkdir -p ${LIB_DIR}/${LIST}/archive
+	for dir in new archive bounce; do
+            mkdir -p ${LIB_DIR}/${LIST}/${dir}
+	    chmod a+rw ${LIB_DIR}/${LIST}/${dir}
+	done
     done
     echo
+
+    postalias ${ALIAS_FILE}
+    postfix reload
 }
 
 # Main entry point
@@ -115,10 +134,11 @@ case $1 in
     "setup")
         setup
         ;;
-    "")
-        echo "Use: $0 setup"
-        ;;
     *)
-       handle_mail $1
-       ;;
+	if [ -n "${LOCAL}" ]; then
+	    handle_mail ${LOCAL}
+	else
+            "Use: $0 setup"
+	fi
+        ;;
 esac
