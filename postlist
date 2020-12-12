@@ -67,8 +67,9 @@ function handle_mail () {
 
     # Figure out if we are CC'ed or Addressed directly
     # Its a bit hard, as we might have multiple TO adresses and multiple CC addresses
-    
-    MAIL=${LIB_DIR}/$LIST/new/$(date -Ins)
+
+    ARCHIVE_DIR=${LIB_DIR}/${LIST}
+    MAIL=${ARCHIVE_DIR}/new/$(date -Ins)
     cat >${MAIL} || (echo Cannot save mail to file; exit $EX_TEMPFAIL)
 
     if formail -z -x 'X-Loop:' | grep -q ${LIST}; then
@@ -79,7 +80,7 @@ function handle_mail () {
 	              -I "DKIM-Signature:" \
 	              -i "Subject:[$LIST Bounce] ${SUBJECT}" \
             | ${SENDMAIL} ${ADMIN}
-	mv $MAIL $(dirname ${MAIL})/../bounce
+	mv $MAIL ${ARCHIVE_DIR}/bounce
 
     else
         SENDER=$(formail -z -x 'From:' < ${MAIL} | sed 's/</(/g' | sed 's/>/)/g')
@@ -90,11 +91,14 @@ function handle_mail () {
 	              -I "Return-Path:" \
 	              -i "From: [${LIST}] ${SENDER} <${ADDRESS}>" \
 	              -I "X-Loop: ${LIST}" \
-	              -I "List-Id: ${DESCRIPTION} <$ADDRESS>" \
-	              -I "DKIM-Signature:" \
                       -I "Message-ID:" -a "Message-ID:" \
+	              -I "DKIM-Signature:" \
+	              -I "List-Id: ${DESCRIPTION} <${ADDRESS/@/.}>" \
+	              -I "List-Post: ${DESCRIPTION} <$ADDRESS>" \
+	              -I "List-Unsubscribe: <$ADMIN>" \
+	              -I "List-Owner: <$ADMIN>" \
             | ${SENDMAIL} -f ${BOUNCE} ${SUBSCRIBERS}
-	mv $MAIL $(dirname ${MAIL})/../archive
+	mv $MAIL ${ARCHIVE_DIR}/archive
     fi
 }
 
