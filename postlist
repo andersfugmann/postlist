@@ -49,7 +49,7 @@ SENDMAIL="/usr/sbin/sendmail -G -i" # NEVER NEVER NEVER use "-t" here.
 EX_TEMPFAIL=75
 EX_UNAVAILABLE=69
 
-# Need to handle CC.
+## Handle list delivery
 function handle_mail () {
     LIST=$1
     ADDRESS=${LIST}@${DOMAIN}
@@ -73,21 +73,31 @@ function handle_mail () {
         cat ${MAIL} \
             | formail -t -f \
 	              -I "List-Id: ${DESCRIPTION} <$ADDRESS>" \
-	              -I "DKIM-Signature:" \
 	              -i "Subject:[$LIST Bounce] ${SUBJECT}" \
             | ${SENDMAIL} ${ADMIN}
 	mv $MAIL ${ARCHIVE_DIR}/bounce
-
     else
-        SENDER=$(formail -z -x 'From:' < ${MAIL} | sed 's/</(/g' | sed 's/>/)/g')
-	#-I "To:${LIST} <${ADDRESS}>" \
+        # Determine the senders name
+        FROM=$(formail -z -x 'From:' < ${MAIL})
+        SENDER=$(echo ${FROM} | sed 's/[ ]*<.*>[ ]*//')
+        if [ -z "$SENDER" ]; then
+            SENDER=$(echo ${FROM} | sed -E 's/.*<(.*)@.*>.*/\1/')
+        fi
 
+        ## Rewrite to / cc fields, so we have a canonical list address
+        ## As the from address has been replaced.
+        REPLACE="s/(^|,)[^,]*<${ADDRESS}>[^,]*(,|\$)/\1${DESCRIPTION} <$ADDRESS>\2/g"
+        TO=$(formail -z -x 'To:' < ${MAIL} | sed -E "${REPLACE}")
+        CC=$(formail -z -x 'Cc:' < ${MAIL} | sed -E "${REPLACE}")
+        # Drop stupid 'Re: Re: Re:' in subject lines
         cat ${MAIL} \
             | formail -t -f \
 	              -I "Return-Path:" \
-	              -i "From: [${LIST}] ${SENDER} <${ADDRESS}>" \
-	              -I "X-Loop: ${LIST}" \
+	              -i "From: ${SENDER} via ${LIST} <${ADDRESS}>" \
+                      -I "To: ${TO}" \
+                      -I "Cc: ${CC}" \
                       -I "Message-ID:" -a "Message-ID:" \
+	              -I "X-Loop: ${LIST}" \
 	              -I "DKIM-Signature:" \
 	              -I "List-Id: ${DESCRIPTION} <${ADDRESS/@/.}>" \
 	              -I "List-Post: ${DESCRIPTION} <$ADDRESS>" \
