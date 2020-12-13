@@ -10,17 +10,12 @@ export PATH=${PATH}:/usr/bin:/usr/sbin
 trim()
 {
     local trimmed="$@"
-
-    # Strip leading space.
     trimmed="${trimmed## }"
-    # Strip trailing space.
     trimmed="${trimmed%% }"
-
     echo "$trimmed"
 }
 
-
-function parseIniFile() { #accepts the name of the file to parse as argument ($1)
+function parse_ini_file() { #accepts the name of the file to parse as argument ($1)
     #declare syntax below (-gA) only works with bash 4.2 and higher
     unset CONFIG
     declare -gA CONFIG
@@ -40,15 +35,16 @@ CONFIG_FILE=${CONFIG_FILE-/etc/postlist.conf}
 if [ -f /etc/default/postlist ]; then
     source /etc/default/postlist
 fi
-echo Parse ${CONFIG_FILE}
-parseIniFile ${CONFIG_FILE}
+parse_ini_file ${CONFIG_FILE}
 
 ADMIN="${CONFIG[general.owner]}"
 LIB_DIR="${CONFIG[general.archive_dir]}"
 ALIAS_FILE="${CONFIG[general.alias_file]}"
 DOMAIN="${CONFIG[general.domain]}"
+MTA="${CONFIG[general.mta]}"
 
 SENDMAIL="/usr/sbin/sendmail -G -i" # NEVER NEVER NEVER use "-t" here.
+
 # Exit codes from <sysexits.h>
 EX_TEMPFAIL=75
 EX_UNAVAILABLE=69
@@ -102,8 +98,21 @@ function handle_mail () {
     fi
 }
 
-## Setup all lists.
+## Setup postfix
+function setup_postfix () {
+    ALIAS_MAPS="$(postconf -p alias_maps)"
+    if grep -q "hash:${ALIAS_FILE}"; then
+        echo "Alias maps already updated."
+    else
+        echo "Updating postfix configuration,"
+        postconf -e "${ALIAS_MAPS}, hash:${ALIAS_FILE}"
+    fi
+    echo "Reloading postfix configuration"
+    postalias ${ALIAS_FILE}
+    postfix reload
+}
 
+## Setup all lists.
 function setup () {
     echo -n "Setup ${ALIAS_FILE} for lists:"
     SCRIPT=$(readlink -f $0)
@@ -129,20 +138,30 @@ function setup () {
     done
     echo
 
-    postalias ${ALIAS_FILE}
-    postfix reload
+    case $MTA in
+        postfix)
+            setup_postfix ()
+            ;;
+        *)
+            echo "Unsupported MTA: ${MTA}."
+            echo "Skipping MTA specific commands"
+    esac
 }
 
 # Main entry point
 case $1 in
-    "setup")
-        setup
-        ;;
-    *)
+    "")
 	if [ -n "${LOCAL}" ]; then
 	    handle_mail ${LOCAL}
 	else
             "Use: $0 setup"
 	fi
+        ;;
+    "setup")
+        setup
+        ;;
+    *)
+        echo "Unknown option $1"
+        exit 1
         ;;
 esac
