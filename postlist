@@ -68,8 +68,8 @@ function handle_mail () {
     MAIL=${ARCHIVE_DIR}/new/$(date -Ins)
     cat >${MAIL} || (echo Cannot save mail to file; exit $EX_TEMPFAIL)
 
-    if formail -z -x 'X-Loop:' | grep -q ${LIST}; then
-        SUBJECT=$(formail -x Subject: < ${MAIL})
+    if formail -c -z -x 'X-Loop:' | grep -q ${LIST}; then
+        SUBJECT=$(formail -c -z -x "Subject:" < ${MAIL})
         cat ${MAIL} \
             | formail -t -f \
 	              -I "List-Id: ${DESCRIPTION} <$ADDRESS>" \
@@ -78,7 +78,8 @@ function handle_mail () {
 	mv $MAIL ${ARCHIVE_DIR}/bounce
     else
         # Determine the senders name
-        FROM=$(formail -z -x 'From:' < ${MAIL})
+        SUBJECT=$(formail -c -z -x "Subject:" < ${MAIL} | sed "s/\[${LIST}\][ ]*//")
+        FROM=$(formail -c -z -x 'From:' < ${MAIL})
         SENDER=$(echo ${FROM} | sed 's/[ ]*<.*>[ ]*//')
         if [ -z "$SENDER" ]; then
             SENDER=$(echo ${FROM} | sed -E 's/.*<(.*)@.*>.*/\1/')
@@ -87,8 +88,8 @@ function handle_mail () {
         ## Rewrite to / cc fields, so we have a canonical list address
         ## As the from address has been replaced.
         REPLACE="s/(^|,)[^,]*<${ADDRESS}>[^,]*(,|\$)/\1${DESCRIPTION} <$ADDRESS>\2/g"
-        TO=$(formail -z -x 'To:' < ${MAIL} | sed -E "${REPLACE}")
-        CC=$(formail -z -x 'Cc:' < ${MAIL} | sed -E "${REPLACE}")
+        TO=$(formail -c -z -x 'To:' < ${MAIL} | sed -E "${REPLACE}")
+        CC=$(formail -c -z -x 'Cc:' < ${MAIL} | sed -E "${REPLACE}")
         # Drop stupid 'Re: Re: Re:' in subject lines
         cat ${MAIL} \
             | formail -t -f \
@@ -96,6 +97,7 @@ function handle_mail () {
 	              -i "From: ${SENDER} via ${LIST} <${ADDRESS}>" \
                       -I "To: ${TO}" \
                       -I "Cc: ${CC}" \
+                      -i "Subject: [${LIST}] ${SUBJECT}" \
                       -I "Message-ID:" -a "Message-ID:" \
 	              -I "X-Loop: ${LIST}" \
 	              -I "DKIM-Signature:" \
@@ -111,7 +113,7 @@ function handle_mail () {
 ## Setup postfix
 function setup_postfix () {
     ALIAS_MAPS="$(postconf -p alias_maps)"
-    if grep -q "hash:${ALIAS_FILE}"; then
+    if grep -q "hash:${ALIAS_FILE}" <(echo $ALIAS_MAPS); then
         echo "Alias maps already updated."
     else
         echo "Updating postfix configuration,"
@@ -150,11 +152,12 @@ function setup () {
 
     case $MTA in
         postfix)
-            setup_postfix ()
+            setup_postfix
             ;;
         *)
             echo "Unsupported MTA: ${MTA}."
             echo "Skipping MTA specific commands"
+	    ;;
     esac
 }
 
