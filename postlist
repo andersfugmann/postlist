@@ -78,7 +78,13 @@ function handle_mail () {
 	mv $MAIL ${ARCHIVE_DIR}/bounce
     else
         # Determine the senders name
-        SUBJECT=$(formail -c -z -x "Subject:" < ${MAIL} | sed "s/\[${LIST}\][ ]*//")
+        # Mailers will do a 'Re: [maillist] Some subject, and we need to keep that.
+
+        SUBJECT=$(formail -c -z -x "Subject:" < ${MAIL})
+        if ! echo $SUBJECT | grep -q '\[${LIST}\]'; then
+            SUBJECT="[${LIST}] ${SUBJECT}"
+        fi
+
         FROM=$(formail -c -z -x 'From:' < ${MAIL})
         SENDER=$(echo ${FROM} | sed 's/[ ]*<.*>[ ]*//')
         if [ -z "$SENDER" ]; then
@@ -97,7 +103,7 @@ function handle_mail () {
 	              -i "From: ${SENDER} via ${LIST} <${ADDRESS}>" \
                       -I "To: ${TO}" \
                       -I "Cc: ${CC}" \
-                      -i "Subject: [${LIST}] ${SUBJECT}" \
+                      -i "Subject: ${SUBJECT}" \
                       -I "Message-ID:" -a "Message-ID:" \
 	              -I "X-Loop: ${LIST}" \
 	              -I "DKIM-Signature:" \
