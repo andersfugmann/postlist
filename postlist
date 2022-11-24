@@ -49,7 +49,7 @@ SENDMAIL="/usr/sbin/sendmail -G -i" # NEVER NEVER NEVER use "-t" here.
 EX_TEMPFAIL=75
 EX_UNAVAILABLE=69
 
-function decode() { : "${*//+/ }"; echo -e "${_//=/\\x}"; }
+function decode () { : "${*//+/ }"; echo -e "${_//=/\\x}"; }
 
 ## Handle list delivery
 function handle_mail () {
@@ -79,17 +79,17 @@ function handle_mail () {
             | ${SENDMAIL} ${ADMIN}
 	mv $MAIL ${ARCHIVE_DIR}/bounce
     else
-        # Extrace subject and remove Re: Re: Re: patterns
+        # Extract subject and remove Re: Re: Re: patterns
         SUBJECT=$(formail -c -z -x "Subject:" < ${MAIL} | sed -E 's/(Re:[ ]+)+/Re: /')
 
         # Prepend list name if not already there.
-        if ! decode $SUBJECT | grep -q "\[${LIST}\]"; then
+        if ! decode "${SUBJECT}" | grep -q "\[${LIST}\]"; then
             SUBJECT="[${LIST}] ${SUBJECT}"
         fi
 
         FROM=$(formail -c -z -x 'From:' < ${MAIL})
         SENDER=$(echo ${FROM} | sed 's/[ ]*<.*>[ ]*//')
-        if [ -z "$SENDER" ]; then
+        if [ -z "${SENDER}" ]; then
             SENDER=$(echo ${FROM} | sed -E 's/.*<(.*)@.*>.*/\1/')
         fi
 
@@ -98,7 +98,6 @@ function handle_mail () {
         REPLACE="s/(^|,)[^,]*<${ADDRESS}>[^,]*(,|\$)/\1${DESCRIPTION} <$ADDRESS>\2/g"
         TO=$(formail -c -z -x 'To:' < ${MAIL} | sed -E "${REPLACE}")
         CC=$(formail -c -z -x 'Cc:' < ${MAIL} | sed -E "${REPLACE}")
-        # Drop stupid 'Re: Re: Re:' in subject lines
         cat ${MAIL} \
             | formail -t -f \
 	              -I "Return-Path:" \
